@@ -7,9 +7,9 @@
   <meta name="description" content="A calmer way to study, practice and understand more with Cognify.">
   <title>Cognify — your learning space</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=themes-1">
+  <link rel="stylesheet" href="/styles.css?v=flashcards-sync-1">
   <link rel="stylesheet" href="/markdown.css?v=answer-layout-1">
-  <script src="/app.js?v=themes-1" defer></script>
+  <script src="/app.js?v=flashcards-sync-1" defer></script>
 </head>
 <body class="auth-required">
   <div class="app-shell">
@@ -42,6 +42,10 @@
       </nav>
 
       <div class="sidebar-label sidebar-label-spaced">LEARN WITH</div>
+      <button class="nav-item" data-nav="flashcards">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2.4"/><path d="M8 9h8M8 12h5M8 15h3"/><path d="M16.8 14.8 19 17l3-3"/></svg>
+        <span>Flashcards</span><span class="nav-count" id="flashcardNavCount">0</span>
+      </button>
       <button class="nav-item tutor-nav" data-nav="tutor">
         <span class="nav-sparkle"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 1.8 5.3L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.7L12 3Z"/><path d="m19 15 .8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15Z"/></svg></span>
         <span>AI tutor</span><span class="live-dot" aria-label="Tutor available"></span>
@@ -124,6 +128,83 @@
               <div class="subject-grid" id="subjectGrid" aria-live="polite"></div>
             </section>
 
+            <section class="flashcards-section" id="flashcardsSection" aria-labelledby="flashcardsTitle">
+              <div class="flashcards-heading">
+                <div><span class="section-kicker">ACTIVE RECALL</span><h2 id="flashcardsTitle">Flashcards</h2><p>Make a prompt, hide the answer, and see what you remember.</p></div>
+                <div class="flashcards-summary" aria-live="polite"><strong id="flashcardDueSummary">0 due today</strong><span id="flashcardTotalSummary">0 cards in your deck</span></div>
+              </div>
+
+              <div class="flashcards-workspace">
+                <section class="flashcard-study-panel" aria-label="Flashcard review">
+                  <div class="flashcard-study-heading">
+                    <div><span class="section-kicker">REVIEW SESSION</span><h3>Practice remembering</h3></div>
+                    <label class="flashcard-filter">Subject<select id="flashcardFilter" aria-label="Filter flashcards by subject"></select></label>
+                  </div>
+                  <div class="flashcard-empty-state" id="flashcardEmptyState">
+                    <span class="flashcard-empty-icon" aria-hidden="true">✦</span>
+                    <h4>Your first card is a small step</h4>
+                    <p>Add a question and its answer. Your cards will be ready here whenever you want to practice.</p>
+                  </div>
+                  <div class="flashcard-ready-panel" id="flashcardReadyPanel" hidden>
+                    <p id="flashcardReadyText">Your cards are ready when you are.</p>
+                    <div class="flashcard-start-actions"><button class="flashcard-primary-button" id="flashcardReviewDue" type="button">Review due cards</button><button class="flashcard-secondary-button" id="flashcardReviewAll" type="button">Review all</button></div>
+                  </div>
+                  <div class="flashcard-session-view" id="flashcardSessionView" hidden>
+                    <div class="flashcard-active-card" id="flashcardActiveCard">
+                      <div class="flashcard-session-progress"><span id="flashcardSessionLabel">Card 1 of 1</span><span class="flashcard-progress-track"><span id="flashcardProgressFill"></span></span></div>
+                      <button class="flashcard-face" id="flashcardFace" type="button" aria-expanded="false" aria-label="Show the answer">
+                        <span class="flashcard-face-label" id="flashcardFaceLabel">QUESTION</span>
+                        <span class="flashcard-face-text" id="flashcardFaceText"></span>
+                        <span class="flashcard-face-hint" id="flashcardFaceHint">Select to reveal the answer</span>
+                      </button>
+                      <div class="flashcard-rating" id="flashcardRating" hidden>
+                        <p>How well did you remember?</p>
+                        <div><button class="flashcard-again-button" id="flashcardAgain" type="button">Need another look</button><button class="flashcard-remembered-button" id="flashcardRemembered" type="button">Got it</button></div>
+                      </div>
+                    </div>
+                    <div class="flashcard-session-complete" id="flashcardSessionComplete" hidden>
+                      <span class="flashcard-empty-icon" aria-hidden="true">✓</span><h4>Nice work. You showed up.</h4><p id="flashcardCompleteText">Your review session is complete.</p>
+                      <div class="flashcard-start-actions"><button class="flashcard-primary-button" id="flashcardRestart" type="button">Review all again</button><button class="flashcard-secondary-button" id="flashcardFinish" type="button">Back to deck</button></div>
+                    </div>
+                  </div>
+                  <p class="flashcard-storage-note">Your deck syncs to your account and stays available on this device.</p>
+                  <p class="flashcard-sync-status" id="flashcardSyncStatus" role="status" aria-live="polite">Sign in to sync this deck across devices.</p>
+                </section>
+
+                <section class="flashcard-editor-panel" aria-labelledby="flashcardFormTitle">
+                  <div class="flashcard-ai-generator">
+                    <div class="flashcard-editor-heading"><span class="section-kicker">AI FLASHCARD MAKER</span><h3>Build a set with Groq</h3><p>Choose a subject and topic. Review and edit every card before adding it.</p></div>
+                    <form class="flashcard-ai-form" id="flashcardGeneratorForm">
+                      <label>Subject<select id="flashcardGenerateSubject" required></select></label>
+                      <label>Topic<input id="flashcardGenerateTopic" type="text" maxlength="120" required placeholder="e.g. Photosynthesis" autocomplete="off"></label>
+                      <label>Number of cards<select id="flashcardGenerateCount"><option value="3">3 cards</option><option value="5" selected>5 cards</option><option value="8">8 cards</option></select></label>
+                      <button class="flashcard-primary-button" id="flashcardGenerateButton" type="submit" disabled>Checking Groq…</button>
+                      <p class="flashcard-form-note" id="flashcardGenerateStatus" role="status" aria-live="polite">One AI use is counted for each set.</p>
+                    </form>
+                    <div class="flashcard-generated-preview" id="flashcardGeneratedPreview" hidden>
+                      <div class="flashcard-preview-heading"><div><strong>Review your cards</strong><span id="flashcardGeneratedSubject"></span></div><span id="flashcardGeneratedCount">0 selected</span></div>
+                      <div class="flashcard-generated-list" id="flashcardGeneratedList"></div>
+                      <div class="flashcard-form-actions"><button class="flashcard-primary-button" id="flashcardAddSelected" type="button" disabled>Add selected cards</button><button class="flashcard-secondary-button" id="flashcardDiscardGenerated" type="button">Discard set</button></div>
+                    </div>
+                  </div>
+                  <div class="flashcard-manual-divider"><span>OR CREATE ONE YOURSELF</span></div>
+                  <div class="flashcard-editor-heading"><span class="section-kicker" id="flashcardFormKicker">BUILD YOUR DECK</span><h3 id="flashcardFormTitle">Create a flashcard</h3><p>Keep each card focused on one idea.</p></div>
+                  <form class="flashcard-form" id="flashcardForm">
+                    <label>Subject<select id="flashcardSubject" required></select></label>
+                    <label>Front <span>Question or prompt</span><textarea id="flashcardFront" maxlength="240" rows="3" required placeholder="e.g. What is the role of the mitochondrion?"></textarea></label>
+                    <label>Back <span>Answer or explanation</span><textarea id="flashcardBack" maxlength="700" rows="4" required placeholder="The mitochondrion releases usable energy for the cell through respiration."></textarea></label>
+                    <div class="flashcard-form-actions"><button class="flashcard-primary-button" id="flashcardSave" type="submit">Save card</button><button class="flashcard-secondary-button" id="flashcardCancelEdit" type="button" hidden>Cancel edit</button></div>
+                    <p class="flashcard-form-note" id="flashcardFormNote" aria-live="polite"></p>
+                  </form>
+                </section>
+              </div>
+
+              <div class="flashcard-library">
+                <div class="flashcard-library-heading"><div><span class="section-kicker">YOUR DECK</span><h3>Your cards</h3></div><span id="flashcardLibraryCount">0 cards</span></div>
+                <div class="flashcard-list" id="flashcardList" aria-live="polite"></div>
+              </div>
+            </section>
+
             <section class="week-card" id="weekSection">
               <div class="section-heading"><div><span class="section-kicker">SHOWING UP IS A WIN</span><h2>Your learning week</h2></div><button class="week-filter" id="weekFilter">This week <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 6 4.5 4.5L12.5 6"/></svg></button></div>
               <div class="chart-wrap" role="img" aria-label="Study minutes this week: Monday 35, Tuesday 52, Wednesday 27, Thursday 64, Friday 46, Saturday 58, Sunday 12">
@@ -144,6 +225,7 @@
                 <label class="task-row"><input class="task-check" type="checkbox" data-task="read"><span class="task-custom" aria-hidden="true"><svg viewBox="0 0 14 14"><path d="m2.4 7.2 3 3L11.7 4"/></svg></span><span class="task-detail"><strong>Read for 10 minutes</strong><small>English · 10 min</small></span><span class="task-subject-dot dot-english"></span></label>
               </div>
               <button class="add-task-button" id="addTaskButton"><span aria-hidden="true">＋</span> Add a little more</button>
+              <small class="study-sync-status" id="studySyncStatus" role="status" aria-live="polite">Sign in to sync your planner and progress.</small>
             </section>
 
             <section class="usage-card" id="billingCard" aria-label="Your Cognify subscription">
@@ -178,6 +260,7 @@
   <div class="mobile-bottom-nav" aria-label="Quick navigation">
     <button class="mobile-nav-button active" data-nav="home"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="6.5" height="6.5" rx="1.6"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.6"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.6"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.6"/></svg><span>Home</span></button>
     <button class="mobile-nav-button" data-nav="subjects"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 5.8c2.5-.9 5-.6 7.5 1.1v12c-2.5-1.7-5-2-7.5-1.1v-12Zm15 0c-2.5-.9-5-.6-7.5 1.1v12c2.5-1.7 5-2 7.5-1.1v-12Z"/></svg><span>Learn</span></button>
+    <button class="mobile-nav-button" data-nav="flashcards"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2.4"/><path d="M8 9h8M8 12h5M8 15h3"/></svg><span>Cards</span></button>
     <button class="mobile-nav-button mobile-tutor-button" data-nav="tutor"><span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 1.8 5.3L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.7L12 3Z"/></svg></span><span>Tutor</span></button>
     <button class="mobile-nav-button" data-nav="planner"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M7.5 3.5v3M16.5 3.5v3M3.8 9.5h16.4M8 13h2m3 0h3"/></svg><span>Plan</span></button>
   </div>

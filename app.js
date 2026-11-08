@@ -2,6 +2,9 @@
 const byId = (id) => document.getElementById(id);
 STORAGE.done = "cognify-plan-done";
 STORAGE.progress = "cognify-progress";
+STORAGE.studyPending = "cognify-study-pending";
+STORAGE.flashcards = "cognify-flashcards";
+STORAGE.flashcardsPending = "cognify-flashcards-pending";
 const LEGACY_STORAGE = { ...STORAGE };
 const LEGACY_DATA_OWNER = "cognify-legacy-data-owner";
 const safeRead = (key, fallback) => {
@@ -19,6 +22,28 @@ const SUBJECT_OPTIONS = Object.values(SUBJECT_GROUPS).flat();
 function normalizeSubjects(value, fallback = DEFAULT_SUBJECTS) {
   const selected = Array.isArray(value) ? [...new Set(value.filter((subject) => SUBJECT_OPTIONS.includes(subject)))] : [];
   return selected.length ? selected : [...fallback];
+}
+function newFlashcardId() { return window.crypto?.randomUUID?.() || Date.now().toString(36) + Math.random().toString(36).slice(2); }
+function normalizeFlashcards(value) {
+  if (!Array.isArray(value)) return [];
+  const today = localDateKey(new Date());
+  return value.slice(0, 500).map((card) => {
+    if (!card || typeof card !== "object") return null;
+    const front = typeof card.front === "string" ? card.front.trim().slice(0, 240) : "";
+    const back = typeof card.back === "string" ? card.back.trim().slice(0, 700) : "";
+    const dueDate = typeof card.dueDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(card.dueDate) && Number.isFinite(new Date(card.dueDate).getTime()) ? card.dueDate : today;
+    if (!front || !back) return null;
+    return {
+      id: typeof card.id === "string" && card.id ? card.id : newFlashcardId(),
+      subject: SUBJECT_OPTIONS.includes(card.subject) ? card.subject : DEFAULT_SUBJECTS[0],
+      front,
+      back,
+      createdAt: Number.isFinite(card.createdAt) ? card.createdAt : Date.now(),
+      dueDate,
+      intervalDays: Number.isFinite(card.intervalDays) ? Math.max(0, Math.min(30, Math.floor(card.intervalDays))) : 0,
+      reviewCount: Number.isFinite(card.reviewCount) ? Math.max(0, Math.floor(card.reviewCount)) : 0
+    };
+  }).filter(Boolean);
 }
 function emptyLearningProgress() { return { activeDays: [], dailyTaskMinutes: {}, quiz: { answered: 0, correct: 0, bySubject: {} }, completedLessons: [] }; }
 function normalizeLearningProgress(value) {
@@ -73,6 +98,31 @@ let quizQuestionSource = "sample";
 let quizLoadNote = "";
 let quizSubject = "All subjects";
 let toastTimer;
+let flashcards = normalizeFlashcards(safeRead(STORAGE.flashcards, []));
+let flashcardFilterSubject = "All subjects";
+let flashcardSessionQueue = [];
+let flashcardSessionIndex = 0;
+let flashcardSessionReviewed = 0;
+let flashcardSessionAgain = 0;
+let flashcardSessionActive = false;
+let flashcardRevealed = false;
+let editingFlashcardId = null;
+let generatedFlashcards = [];
+let generatedFlashcardSubject = "";
+let generatingFlashcards = false;
+let flashcardGeneratorMessage = "One AI use is counted for each generated set.";
+let flashcardSyncTimer = null;
+let flashcardSyncRun = 0;
+let flashcardSyncInFlight = false;
+let flashcardSyncQueued = false;
+let flashcardSyncReady = false;
+let flashcardLocalRevision = 0;
+let studySyncTimer = null;
+let studySyncRun = 0;
+let studySyncInFlight = false;
+let studySyncQueued = false;
+let studySyncReady = false;
+let studyLocalRevision = 0;
 
 function renderThemeControls() {
   const paletteOptions = byId("themePaletteOptions");
@@ -167,6 +217,8 @@ function syncProfile() {
   byId("levelSetting").value = profile.level;
   renderSubjectOptions();
   renderSubjectCards();
+  renderFlashcards();
+  updateFlashcardGeneratorControls();
   const subjectNavCount = byId("subjectNavCount");
   if (subjectNavCount) subjectNavCount.textContent = String(activeSubjects.length);
   const welcome = byId("tutorWelcomeMessage");
@@ -188,7 +240,11 @@ function syncAccountModal() {
   } else setAccountMode(accountMode);
 }
 
-function bindAccountStorage(user, isNewAccount = false) {
+async function bindAccountStorage(user, isNewAccount = false) {
+  resetFlashcardSyncState();
+  flashcardSyncReady = false;
+  resetStudySyncState();
+  studySyncReady = false;
   const accountKeys = Object.fromEntries(Object.keys(LEGACY_STORAGE).map((key) => [key, "cognify-account-" + user.id + "-" + key]));
   let hasAccountData = false;
   try { hasAccountData = Object.values(accountKeys).some((key) => localStorage.getItem(key) !== null); } catch {}
@@ -199,10 +255,15 @@ function bindAccountStorage(user, isNewAccount = false) {
   // data may belong to a different person using this browser.
   if (!isNewAccount && !hasAccountData && legacyOwner === user.id) {
     let migrated = false;
-    for (const key of ["tasks", "chat", "done"]) {
+    for (const key of ["tasks", "chat", "done", "progress", "flashcards"]) {
       try {
         const legacyValue = localStorage.getItem(LEGACY_STORAGE[key]);
-        if (legacyValue !== null) { localStorage.setItem(accountKeys[key], legacyValue); migrated = true; }
+        if (legacyValue !== null) {
+          localStorage.setItem(accountKeys[key], legacyValue);
+          if (key === "flashcards") localStorage.setItem(accountKeys.flashcardsPending, "true");
+          if (["tasks", "done", "progress"].includes(key)) localStorage.setItem(accountKeys.studyPending, "true");
+          migrated = true;
+        }
       } catch {}
     }
     if (migrated) { try { localStorage.setItem(LEGACY_DATA_OWNER, user.id); } catch {} }
@@ -219,9 +280,13 @@ function bindAccountStorage(user, isNewAccount = false) {
     safeWrite(STORAGE.chat, []);
     safeWrite(STORAGE.done, []);
     safeWrite(STORAGE.progress, emptyLearningProgress());
+    safeWrite(STORAGE.studyPending, false);
+    safeWrite(STORAGE.flashcards, []);
+    safeWrite(STORAGE.flashcardsPending, false);
   }
   customTasks = safeRead(STORAGE.tasks, []);
   chatHistory = safeRead(STORAGE.chat, []);
+  flashcards = normalizeFlashcards(safeRead(STORAGE.flashcards, []));
   learningProgress = normalizeLearningProgress(safeRead(STORAGE.progress, emptyLearningProgress()));
   document.querySelectorAll("#taskList .custom-task-row").forEach((row) => row.remove());
   document.querySelectorAll("#taskList .task-check").forEach((checkbox) => { checkbox.checked = false; });
@@ -231,17 +296,50 @@ function bindAccountStorage(user, isNewAccount = false) {
   renderDashboardProgress();
   renderSubjectOptions();
   renderSubjectCards();
+  flashcardFilterSubject = "All subjects";
+  flashcardSessionQueue = [];
+  flashcardSessionIndex = 0;
+  flashcardSessionReviewed = 0;
+  flashcardSessionAgain = 0;
+  flashcardSessionActive = false;
+  flashcardRevealed = false;
+  editingFlashcardId = null;
+  resetFlashcardForm();
+  clearGeneratedFlashcards();
+  renderFlashcards();
+  await Promise.all([
+    syncFlashcardsFromServer(user.id, flashcardSyncRun),
+    syncStudyStateFromServer(user.id, studySyncRun)
+  ]);
 }
 
 function clearSignedOutStudyView() {
+  resetFlashcardSyncState();
+  flashcardSyncReady = false;
+  resetStudySyncState();
+  studySyncReady = false;
   Object.assign(STORAGE, LEGACY_STORAGE);
   customTasks = [];
   chatHistory = [];
+  flashcards = [];
+  flashcardSessionQueue = [];
+  flashcardSessionIndex = 0;
+  flashcardSessionReviewed = 0;
+  flashcardSessionAgain = 0;
+  flashcardSessionActive = false;
+  flashcardRevealed = false;
+  editingFlashcardId = null;
+  flashcardFilterSubject = "All subjects";
   learningProgress = emptyLearningProgress();
   document.querySelectorAll("#taskList .custom-task-row").forEach((row) => row.remove());
   document.querySelectorAll("#taskList .task-check").forEach((checkbox) => { checkbox.checked = false; });
   byId("chatMessages").replaceChildren();
   byId("starterPrompts").hidden = false;
+  resetFlashcardForm();
+  clearGeneratedFlashcards();
+  setFlashcardSyncStatus("Sign in to sync this deck across devices.");
+  setStudySyncStatus("Sign in to sync your planner and progress.");
+  renderFlashcards();
   updatePlanProgress();
   renderDashboardProgress();
 }
@@ -387,7 +485,7 @@ async function restoreAccountSession() {
     if (!result.profile) return;
     signedInProfile = result.profile;
     loadThemePreference();
-    bindAccountStorage(result.profile, false);
+    await bindAccountStorage(result.profile, false);
     syncProfile();
     syncBillingUI(signedInProfile.billing);
     document.body.classList.remove("auth-required");
@@ -419,9 +517,10 @@ async function checkTutorStatus() {
   const dot = document.querySelector(".panel-status-dot");
   status.textContent = tutorReady ? "Groq AI configured" : "Preview mode · connect an AI key";
   byId("tutorPrivacyText").textContent = tutorReady
-    ? "AI Buddy sends questions to Groq. Practice questions are generated by Groq too."
-    : "Preview chats stay on this device. Groq generates practice questions when configured.";
+    ? "AI Buddy, practice questions, and flashcard sets are generated by Groq."
+    : "Preview chats stay on this device. Groq powers practice questions and flashcards when configured.";
   dot.classList.toggle("ready", tutorReady);
+  updateFlashcardGeneratorControls();
 }
 
 function openTutor() {
@@ -861,13 +960,12 @@ function saveTaskState() {
     const input = document.querySelector('[data-task="' + CSS.escape(task.id) + '"]');
     return { ...task, done: input ? input.checked : task.done };
   });
-  safeWrite(STORAGE.tasks, customTasks);
   learningProgress.dailyTaskMinutes[today] = Object.fromEntries(checked.map((input) => {
     const estimate = input.closest(".task-row")?.querySelector(".task-detail small")?.textContent.match(/(\d+)\s*min/i);
     return [input.dataset.task, estimate ? Number(estimate[1]) : 0];
   }));
   if (checked.length) recordLearningActivity(today);
-  safeWrite(STORAGE.progress, learningProgress);
+  saveStudyStateLocally();
   renderDashboardProgress();
 }
 function updatePlanProgress() {
@@ -888,6 +986,625 @@ function dateFromKey(key) {
 function recordLearningActivity(day = localDateKey(new Date())) {
   if (!learningProgress.activeDays.includes(day)) learningProgress.activeDays.push(day);
 }
+function addLocalDays(dayKey, days) {
+  const date = dateFromKey(dayKey);
+  date.setDate(date.getDate() + days);
+  return localDateKey(date);
+}
+function flashcardsForFilter() {
+  return flashcardFilterSubject === "All subjects"
+    ? flashcards
+    : flashcards.filter((card) => card.subject === flashcardFilterSubject);
+}
+function fillSelect(select, values, includeAll = false, currentValue = "") {
+  if (!select) return;
+  select.replaceChildren();
+  if (includeAll) {
+    const allOption = document.createElement("option");
+    allOption.value = "All subjects";
+    allOption.textContent = "All subjects";
+    select.append(allOption);
+  }
+  values.forEach((value) => {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = value;
+    select.append(option);
+  });
+  if ([...select.options].some((option) => option.value === currentValue)) select.value = currentValue;
+}
+function renderFlashcardSelects() {
+  const filterSubjects = [...new Set([...activeSubjects, ...flashcards.map((card) => card.subject)])];
+  fillSelect(byId("flashcardFilter"), filterSubjects, true, flashcardFilterSubject);
+  if (![...byId("flashcardFilter").options].some((option) => option.value === flashcardFilterSubject)) {
+    flashcardFilterSubject = "All subjects";
+    byId("flashcardFilter").value = flashcardFilterSubject;
+  }
+  const selectedSubject = byId("flashcardSubject").value || activeSubjects[0] || DEFAULT_SUBJECTS[0];
+  fillSelect(byId("flashcardSubject"), SUBJECT_OPTIONS, false, selectedSubject);
+  if (![...byId("flashcardSubject").options].some((option) => option.value === selectedSubject)) {
+    byId("flashcardSubject").value = activeSubjects[0] || DEFAULT_SUBJECTS[0];
+  }
+  const generatorSubject = byId("flashcardGenerateSubject").value || activeSubjects[0] || DEFAULT_SUBJECTS[0];
+  fillSelect(byId("flashcardGenerateSubject"), SUBJECT_OPTIONS, false, generatorSubject);
+}
+function setFlashcardSyncStatus(message) {
+  const status = byId("flashcardSyncStatus");
+  if (status) status.textContent = message;
+}
+function resetFlashcardSyncState() {
+  clearTimeout(flashcardSyncTimer);
+  flashcardSyncTimer = null;
+  flashcardSyncRun += 1;
+  flashcardSyncInFlight = false;
+  flashcardSyncQueued = false;
+  flashcardLocalRevision = 0;
+}
+function saveFlashcardsLocally() {
+  safeWrite(STORAGE.flashcards, flashcards);
+  safeWrite(STORAGE.flashcardsPending, true);
+  flashcardLocalRevision += 1;
+  if (!signedInProfile) {
+    setFlashcardSyncStatus("Saved in this browser. Sign in to sync across devices.");
+  } else if (!flashcardSyncReady) {
+    flashcardSyncQueued = true;
+    setFlashcardSyncStatus("Saved here. Waiting for your account deck to load…");
+  } else {
+    setFlashcardSyncStatus("Saving your deck to your account…");
+    scheduleFlashcardSync();
+  }
+}
+function scheduleFlashcardSync(delay = 450) {
+  if (!signedInProfile) return;
+  if (!flashcardSyncReady || flashcardSyncInFlight) { flashcardSyncQueued = true; return; }
+  clearTimeout(flashcardSyncTimer);
+  const userId = signedInProfile.id;
+  const run = flashcardSyncRun;
+  flashcardSyncTimer = window.setTimeout(() => { pushFlashcardsToServer(userId, run); }, delay);
+}
+async function pushFlashcardsToServer(userId, run) {
+  if (run !== flashcardSyncRun || signedInProfile?.id !== userId) return;
+  if (!flashcardSyncReady) { flashcardSyncQueued = true; return; }
+  if (flashcardSyncInFlight) { flashcardSyncQueued = true; return; }
+  flashcardSyncInFlight = true;
+  flashcardSyncTimer = null;
+  const revision = flashcardLocalRevision;
+  const deckSnapshot = flashcards.map((card) => ({ ...card }));
+  try {
+    const response = await fetch("/api/flashcards", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ cards: deckSnapshot }),
+      signal: AbortSignal.timeout(10_000)
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || "Your deck couldn't sync right now.");
+    if (run !== flashcardSyncRun || signedInProfile?.id !== userId) return;
+    if (flashcardLocalRevision === revision) safeWrite(STORAGE.flashcardsPending, false);
+    setFlashcardSyncStatus("Synced " + result.cardCount + (result.cardCount === 1 ? " card to your account." : " cards to your account."));
+  } catch {
+    if (run === flashcardSyncRun && signedInProfile?.id === userId) {
+      setFlashcardSyncStatus("Saved on this device. Account sync will retry when you make another change or reopen Cognify.");
+    }
+  } finally {
+    if (run === flashcardSyncRun) {
+      flashcardSyncInFlight = false;
+      if (signedInProfile?.id === userId && (flashcardSyncQueued || flashcardLocalRevision !== revision)) {
+        flashcardSyncQueued = false;
+        scheduleFlashcardSync(200);
+      }
+    }
+  }
+}
+async function syncFlashcardsFromServer(userId, run) {
+  const localRevision = flashcardLocalRevision;
+  setFlashcardSyncStatus("Loading your account deck…");
+  try {
+    const response = await fetch("/api/flashcards", {
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(10_000)
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || "Your account deck couldn't be loaded.");
+    if (run !== flashcardSyncRun || signedInProfile?.id !== userId) return;
+    const hasPendingChanges = safeRead(STORAGE.flashcardsPending, false) === true;
+    if (result.stored === true && Array.isArray(result.cards) && !hasPendingChanges) {
+      flashcards = normalizeFlashcards(result.cards);
+      safeWrite(STORAGE.flashcards, flashcards);
+      renderFlashcards();
+      flashcardSyncReady = true;
+      setFlashcardSyncStatus("Synced " + flashcards.length + (flashcards.length === 1 ? " card to your account." : " cards to your account."));
+      if (flashcardLocalRevision !== localRevision) scheduleFlashcardSync(0);
+      return;
+    }
+    flashcardSyncReady = true;
+    flashcardSyncQueued = false;
+    setFlashcardSyncStatus(hasPendingChanges ? "Syncing your latest browser changes to your account…" : "Saving this browser’s deck to your account…");
+    await pushFlashcardsToServer(userId, run);
+  } catch {
+    if (run !== flashcardSyncRun || signedInProfile?.id !== userId) return;
+    flashcardSyncReady = true;
+    flashcardSyncQueued = false;
+    setFlashcardSyncStatus("Your deck is saved in this browser. Account sync will be available when the server is updated and reachable.");
+  }
+}
+function setStudySyncStatus(message) {
+  const status = byId("studySyncStatus");
+  if (status) status.textContent = message;
+}
+function resetStudySyncState() {
+  clearTimeout(studySyncTimer);
+  studySyncTimer = null;
+  studySyncRun += 1;
+  studySyncInFlight = false;
+  studySyncQueued = false;
+  studyLocalRevision = 0;
+}
+function saveStudyStateLocally() {
+  safeWrite(STORAGE.tasks, customTasks);
+  safeWrite(STORAGE.done, safeRead(STORAGE.done, []));
+  safeWrite(STORAGE.progress, learningProgress);
+  safeWrite(STORAGE.studyPending, true);
+  studyLocalRevision += 1;
+  if (!signedInProfile) {
+    setStudySyncStatus("Saved in this browser. Sign in to sync across devices.");
+  } else if (!studySyncReady) {
+    studySyncQueued = true;
+    setStudySyncStatus("Saved here. Waiting for your account study data to load…");
+  } else {
+    setStudySyncStatus("Saving your planner and progress to your account…");
+    scheduleStudySync();
+  }
+}
+function scheduleStudySync(delay = 450) {
+  if (!signedInProfile) return;
+  if (!studySyncReady || studySyncInFlight) { studySyncQueued = true; return; }
+  clearTimeout(studySyncTimer);
+  const userId = signedInProfile.id;
+  const run = studySyncRun;
+  studySyncTimer = window.setTimeout(() => { pushStudyStateToServer(userId, run); }, delay);
+}
+async function pushStudyStateToServer(userId, run) {
+  if (run !== studySyncRun || signedInProfile?.id !== userId) return;
+  if (!studySyncReady) { studySyncQueued = true; return; }
+  if (studySyncInFlight) { studySyncQueued = true; return; }
+  studySyncInFlight = true;
+  studySyncTimer = null;
+  const revision = studyLocalRevision;
+  const state = {
+    customTasks: customTasks.map((task) => ({ ...task })),
+    done: safeRead(STORAGE.done, []),
+    progress: JSON.parse(JSON.stringify(learningProgress))
+  };
+  try {
+    const response = await fetch("/api/study/workspace", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(state),
+      signal: AbortSignal.timeout(10_000)
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || "Your planner couldn't sync right now.");
+    if (run !== studySyncRun || signedInProfile?.id !== userId) return;
+    if (studyLocalRevision === revision) safeWrite(STORAGE.studyPending, false);
+    setStudySyncStatus("Planner and progress synced to your account.");
+  } catch {
+    if (run === studySyncRun && signedInProfile?.id === userId) {
+      setStudySyncStatus("Saved on this device. Planner sync will retry when you make another change or reopen Cognify.");
+    }
+  } finally {
+    if (run === studySyncRun) {
+      studySyncInFlight = false;
+      if (signedInProfile?.id === userId && (studySyncQueued || studyLocalRevision !== revision)) {
+        studySyncQueued = false;
+        scheduleStudySync(200);
+      }
+    }
+  }
+}
+function renderAccountStudyState() {
+  document.querySelectorAll("#taskList .custom-task-row").forEach((row) => row.remove());
+  document.querySelectorAll("#taskList .task-check").forEach((checkbox) => { checkbox.checked = false; });
+  restoreTasks();
+  renderDashboardProgress();
+  renderSubjectCards();
+}
+async function syncStudyStateFromServer(userId, run) {
+  const localRevision = studyLocalRevision;
+  setStudySyncStatus("Loading your planner and progress…");
+  try {
+    const response = await fetch("/api/study/workspace", {
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(10_000)
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || "Your account study data couldn't be loaded.");
+    if (run !== studySyncRun || signedInProfile?.id !== userId) return;
+    const hasPendingChanges = safeRead(STORAGE.studyPending, false) === true;
+    if (result.stored === true && Array.isArray(result.customTasks) && !hasPendingChanges) {
+      customTasks = result.customTasks;
+      learningProgress = normalizeLearningProgress(result.progress);
+      safeWrite(STORAGE.tasks, customTasks);
+      safeWrite(STORAGE.done, result.done);
+      safeWrite(STORAGE.progress, learningProgress);
+      renderAccountStudyState();
+      studySyncReady = true;
+      setStudySyncStatus("Planner and progress synced to your account.");
+      if (studyLocalRevision !== localRevision) scheduleStudySync(0);
+      return;
+    }
+    studySyncReady = true;
+    studySyncQueued = false;
+    setStudySyncStatus(hasPendingChanges ? "Syncing your latest browser changes to your account…" : "Saving this browser’s planner and progress to your account…");
+    await pushStudyStateToServer(userId, run);
+  } catch {
+    if (run !== studySyncRun || signedInProfile?.id !== userId) return;
+    studySyncReady = true;
+    studySyncQueued = false;
+    setStudySyncStatus("Your planner is saved in this browser. Account sync will be available when the server is updated and reachable.");
+  }
+}
+function updateFlashcardGeneratorControls() {
+  const button = byId("flashcardGenerateButton");
+  if (!button) return;
+  const status = byId("flashcardGenerateStatus");
+  button.disabled = generatingFlashcards || !signedInProfile || !tutorReady || generatedFlashcards.length > 0;
+  button.textContent = generatingFlashcards ? "Generating cards…" : "Generate cards";
+  if (generatingFlashcards) status.textContent = "Groq is creating your set…";
+  else if (!signedInProfile) status.textContent = "Sign in to generate AI flashcards.";
+  else if (!tutorReady) status.textContent = "Groq is not configured on this server yet.";
+  else status.textContent = flashcardGeneratorMessage;
+}
+function updateGeneratedFlashcardActions() {
+  const selected = generatedFlashcards.filter((card) => card.selected);
+  const valid = selected.every((card) => card.front.trim() && card.back.trim());
+  byId("flashcardGeneratedCount").textContent = selected.length + " of " + generatedFlashcards.length + " selected";
+  byId("flashcardAddSelected").disabled = selected.length === 0 || !valid;
+  if (selected.length && !valid) flashcardGeneratorMessage = "Selected cards need a prompt and an answer.";
+  else if (flashcardGeneratorMessage === "Selected cards need a prompt and an answer.") flashcardGeneratorMessage = "Edit the prompts or answers, then add the cards you want.";
+  updateFlashcardGeneratorControls();
+}
+function renderGeneratedFlashcards() {
+  const preview = byId("flashcardGeneratedPreview");
+  const list = byId("flashcardGeneratedList");
+  if (!preview || !list) return;
+  list.replaceChildren();
+  preview.hidden = generatedFlashcards.length === 0;
+  byId("flashcardGeneratedSubject").textContent = generatedFlashcardSubject ? "For " + generatedFlashcardSubject : "";
+  generatedFlashcards.forEach((card, index) => {
+    const item = document.createElement("article");
+    item.className = "flashcard-generated-item";
+    const heading = document.createElement("div");
+    heading.className = "flashcard-generated-item-heading";
+    const label = document.createElement("label");
+    label.className = "flashcard-generated-select";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = card.selected;
+    checkbox.dataset.generatedIndex = String(index);
+    checkbox.setAttribute("aria-label", "Include flashcard " + (index + 1));
+    const number = document.createElement("span");
+    number.textContent = "Card " + (index + 1);
+    label.append(checkbox, number);
+    heading.append(label);
+    const frontLabel = document.createElement("label");
+    frontLabel.className = "flashcard-generated-field";
+    frontLabel.textContent = "Front · prompt";
+    const front = document.createElement("textarea");
+    front.value = card.front;
+    front.maxLength = 240;
+    front.rows = 2;
+    front.dataset.generatedIndex = String(index);
+    front.dataset.generatedField = "front";
+    front.setAttribute("aria-label", "Edit prompt for card " + (index + 1));
+    frontLabel.append(front);
+    const backLabel = document.createElement("label");
+    backLabel.className = "flashcard-generated-field";
+    backLabel.textContent = "Back · answer";
+    const back = document.createElement("textarea");
+    back.value = card.back;
+    back.maxLength = 700;
+    back.rows = 3;
+    back.dataset.generatedIndex = String(index);
+    back.dataset.generatedField = "back";
+    back.setAttribute("aria-label", "Edit answer for card " + (index + 1));
+    backLabel.append(back);
+    item.append(heading, frontLabel, backLabel);
+    list.append(item);
+  });
+  updateGeneratedFlashcardActions();
+  updateFlashcardGeneratorControls();
+}
+function clearGeneratedFlashcards(message = "One AI use is counted for each generated set.") {
+  generatedFlashcards = [];
+  generatedFlashcardSubject = "";
+  flashcardGeneratorMessage = message;
+  renderGeneratedFlashcards();
+}
+async function generateFlashcards(event) {
+  event.preventDefault();
+  if (generatingFlashcards || generatedFlashcards.length || !signedInProfile || !tutorReady) return;
+  const subject = byId("flashcardGenerateSubject").value;
+  const topic = byId("flashcardGenerateTopic").value.trim();
+  const count = Number(byId("flashcardGenerateCount").value);
+  if (!subject || !topic) {
+    flashcardGeneratorMessage = "Choose a subject and enter a topic first.";
+    updateFlashcardGeneratorControls();
+    return;
+  }
+  generatingFlashcards = true;
+  updateFlashcardGeneratorControls();
+  try {
+    const response = await fetch("/api/flashcards/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ subject, topic, count })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const message = response.status === 404
+        ? "Cognify's server needs a restart to load AI flashcards. In the project folder, run npm.cmd run dev, then reload the app."
+        : result.error || "Groq couldn't generate this set. Please try again.";
+      const error = new Error(message);
+      error.code = result.code;
+      throw error;
+    }
+    if (!Array.isArray(result.cards) || result.cards.length !== count || result.cards.some((card) => !card || typeof card.front !== "string" || typeof card.back !== "string")) {
+      throw new Error("Groq returned an incomplete set. Please try again.");
+    }
+    if (result.billing && signedInProfile) {
+      signedInProfile.billing = result.billing;
+      syncBillingUI(result.billing);
+    }
+    generatedFlashcardSubject = subject;
+    generatedFlashcards = result.cards.map((card) => ({ front: card.front, back: card.back, selected: true }));
+    flashcardGeneratorMessage = "Edit the prompts or answers, then add the cards you want.";
+    byId("flashcardGenerateTopic").value = "";
+    renderGeneratedFlashcards();
+  } catch (error) {
+    if (error.code === "usage_limit_reached") { window.location.assign("/pricing?limit=reached"); return; }
+    flashcardGeneratorMessage = error.message || "Groq couldn't generate this set. Please try again.";
+    updateFlashcardGeneratorControls();
+  } finally {
+    generatingFlashcards = false;
+    updateFlashcardGeneratorControls();
+  }
+}
+function saveSelectedGeneratedFlashcards() {
+  const selected = generatedFlashcards.filter((card) => card.selected);
+  if (!selected.length || selected.some((card) => !card.front.trim() || !card.back.trim())) {
+    flashcardGeneratorMessage = "Each selected card needs a prompt and an answer.";
+    updateFlashcardGeneratorControls();
+    return;
+  }
+  if (flashcards.length + selected.length > 500) {
+    flashcardGeneratorMessage = "Your deck can hold up to 500 cards. Remove a few before adding this set.";
+    updateFlashcardGeneratorControls();
+    return;
+  }
+  const subject = generatedFlashcardSubject;
+  const today = localDateKey(new Date());
+  const now = Date.now();
+  flashcards.push(...selected.map((card, index) => ({
+    id: newFlashcardId() + "-" + index,
+    subject,
+    front: card.front.trim(),
+    back: card.back.trim(),
+    createdAt: now + index,
+    dueDate: today,
+    intervalDays: 0,
+    reviewCount: 0
+  })));
+  flashcardFilterSubject = subject;
+  flashcardSessionQueue = [];
+  flashcardSessionIndex = 0;
+  flashcardSessionActive = false;
+  flashcardRevealed = false;
+  saveFlashcardsLocally();
+  clearGeneratedFlashcards("Added " + selected.length + " AI-generated " + (selected.length === 1 ? "card" : "cards") + " to your deck.");
+  renderFlashcards();
+  showToast(selected.length + (selected.length === 1 ? " card was" : " cards were") + " added to your deck.", "success");
+}
+function formatFlashcardDueDate(dayKey) {
+  const today = localDateKey(new Date());
+  if (dayKey <= today) return "Ready to review";
+  return "Due " + dateFromKey(dayKey).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+function renderFlashcardSummary(filteredCards) {
+  const today = localDateKey(new Date());
+  const dueCount = flashcards.filter((card) => card.dueDate <= today).length;
+  const totalCount = flashcards.length;
+  byId("flashcardDueSummary").textContent = dueCount + " due today";
+  byId("flashcardTotalSummary").textContent = totalCount + (totalCount === 1 ? " card in your deck" : " cards in your deck");
+  byId("flashcardLibraryCount").textContent = filteredCards.length + (filteredCards.length === 1 ? " card" : " cards");
+  byId("flashcardNavCount").textContent = String(totalCount);
+
+  const filteredDue = filteredCards.filter((card) => card.dueDate <= today).length;
+  const subjectName = flashcardFilterSubject === "All subjects" ? "Your deck" : flashcardFilterSubject;
+  const dueMessage = filteredDue
+    ? filteredDue + (filteredDue === 1 ? " card is" : " cards are") + " ready to review today."
+    : "No cards are due today.";
+  byId("flashcardReadyText").textContent = subjectName + " has " + filteredCards.length + (filteredCards.length === 1 ? " card. " : " cards. ") + dueMessage + " You can also review the full set.";
+  const dueButton = byId("flashcardReviewDue");
+  dueButton.textContent = filteredDue ? "Review due (" + filteredDue + ")" : "No cards due";
+  dueButton.disabled = filteredDue === 0;
+  byId("flashcardReviewAll").textContent = "Review all (" + filteredCards.length + ")";
+  byId("flashcardReviewAll").disabled = filteredCards.length === 0;
+}
+function renderFlashcardList(filteredCards) {
+  const list = byId("flashcardList");
+  list.replaceChildren();
+  if (!filteredCards.length) {
+    const empty = document.createElement("p");
+    empty.className = "flashcard-list-empty";
+    empty.textContent = flashcards.length ? "No cards for this subject yet." : "Your saved cards will appear here.";
+    list.append(empty);
+    return;
+  }
+  [...filteredCards].sort((a, b) => b.createdAt - a.createdAt).forEach((card) => {
+    const item = document.createElement("article");
+    item.className = "flashcard-list-item";
+    const meta = document.createElement("div");
+    meta.className = "flashcard-list-meta";
+    const subject = document.createElement("span");
+    subject.className = "flashcard-subject-tag";
+    subject.textContent = card.subject;
+    const due = document.createElement("span");
+    due.className = "flashcard-due-tag";
+    due.textContent = formatFlashcardDueDate(card.dueDate);
+    const front = document.createElement("strong");
+    front.textContent = card.front;
+    const back = document.createElement("p");
+    back.textContent = card.back;
+    const actions = document.createElement("div");
+    actions.className = "flashcard-list-actions";
+    const edit = document.createElement("button");
+    edit.type = "button";
+    edit.dataset.flashcardAction = "edit";
+    edit.dataset.flashcardId = card.id;
+    edit.textContent = "Edit";
+    edit.setAttribute("aria-label", "Edit flashcard: " + card.front);
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "flashcard-delete-button";
+    remove.dataset.flashcardAction = "delete";
+    remove.dataset.flashcardId = card.id;
+    remove.textContent = "Delete";
+    remove.setAttribute("aria-label", "Delete flashcard: " + card.front);
+    actions.append(edit, remove);
+    meta.append(subject, due);
+    item.append(meta, front, back, actions);
+    list.append(item);
+  });
+}
+function renderFlashcardSession(filteredCards) {
+  const empty = byId("flashcardEmptyState");
+  const ready = byId("flashcardReadyPanel");
+  const session = byId("flashcardSessionView");
+  const hasCards = filteredCards.length > 0;
+  empty.hidden = hasCards || flashcardSessionActive;
+  const emptyHeading = empty.querySelector("h4");
+  const emptyCopy = empty.querySelector("p");
+  emptyHeading.textContent = flashcards.length ? "No cards for this subject yet" : "Your first card is a small step";
+  emptyCopy.textContent = flashcards.length
+    ? "Add a card for this subject or choose another subject from the filter."
+    : "Add a question and its answer. Your cards will be ready here whenever you want to practice.";
+  ready.hidden = !hasCards || flashcardSessionActive;
+  session.hidden = !flashcardSessionActive;
+  if (!flashcardSessionActive) return;
+
+  const complete = flashcardSessionIndex >= flashcardSessionQueue.length;
+  const activeCardPanel = byId("flashcardActiveCard");
+  const completePanel = byId("flashcardSessionComplete");
+  activeCardPanel.hidden = complete;
+  completePanel.hidden = !complete;
+  if (complete) {
+    byId("flashcardCompleteText").textContent = "You reviewed " + flashcardSessionReviewed + (flashcardSessionReviewed === 1 ? " card." : " cards.") + (flashcardSessionAgain ? " " + flashcardSessionAgain + (flashcardSessionAgain === 1 ? " is" : " are") + " ready to try again today." : " Your remembered cards are scheduled for another day.");
+    return;
+  }
+
+  const card = flashcards.find((item) => item.id === flashcardSessionQueue[flashcardSessionIndex]);
+  if (!card) {
+    flashcardSessionQueue = flashcardSessionQueue.filter((id) => flashcards.some((item) => item.id === id));
+    flashcardSessionIndex = Math.min(flashcardSessionIndex, flashcardSessionQueue.length);
+    return renderFlashcardSession(filteredCards);
+  }
+  byId("flashcardSessionLabel").textContent = "Card " + (flashcardSessionIndex + 1) + " of " + flashcardSessionQueue.length + " · " + card.subject;
+  byId("flashcardProgressFill").style.width = Math.round((flashcardSessionIndex + 1) / flashcardSessionQueue.length * 100) + "%";
+  byId("flashcardFaceLabel").textContent = flashcardRevealed ? "ANSWER" : "QUESTION";
+  byId("flashcardFaceText").textContent = flashcardRevealed ? card.back : card.front;
+  byId("flashcardFaceHint").textContent = flashcardRevealed ? "Choose how well you remembered" : "Select to reveal the answer";
+  byId("flashcardFace").classList.toggle("is-answer", flashcardRevealed);
+  byId("flashcardFace").setAttribute("aria-expanded", String(flashcardRevealed));
+  byId("flashcardFace").setAttribute("aria-label", flashcardRevealed ? "Show the question" : "Show the answer");
+  byId("flashcardRating").hidden = !flashcardRevealed;
+}
+function renderFlashcards() {
+  if (!byId("flashcardList")) return;
+  renderFlashcardSelects();
+  const filteredCards = flashcardsForFilter();
+  renderFlashcardSummary(filteredCards);
+  renderFlashcardList(filteredCards);
+  renderFlashcardSession(filteredCards);
+}
+function startFlashcardSession(dueOnly = true) {
+  const today = localDateKey(new Date());
+  const cards = [...flashcardsForFilter()].filter((card) => !dueOnly || card.dueDate <= today).sort((a, b) => a.dueDate.localeCompare(b.dueDate) || a.createdAt - b.createdAt);
+  if (!cards.length) return;
+  flashcardSessionQueue = cards.map((card) => card.id);
+  flashcardSessionIndex = 0;
+  flashcardSessionReviewed = 0;
+  flashcardSessionAgain = 0;
+  flashcardSessionActive = true;
+  flashcardRevealed = false;
+  renderFlashcards();
+  byId("flashcardFace").focus({ preventScroll: true });
+}
+function rateFlashcard(remembered) {
+  if (!flashcardSessionActive || !flashcardRevealed) return;
+  const card = flashcards.find((item) => item.id === flashcardSessionQueue[flashcardSessionIndex]);
+  if (!card) return;
+  const today = localDateKey(new Date());
+  card.reviewCount += 1;
+  if (remembered) {
+    card.intervalDays = Math.min(card.intervalDays ? card.intervalDays * 2 : 1, 30);
+    card.dueDate = addLocalDays(today, card.intervalDays);
+  } else {
+    card.intervalDays = 0;
+    card.dueDate = today;
+    flashcardSessionAgain += 1;
+  }
+  saveFlashcardsLocally();
+  flashcardSessionReviewed += 1;
+  flashcardSessionIndex += 1;
+  flashcardRevealed = false;
+  recordLearningActivity();
+  saveStudyStateLocally();
+  renderDashboardProgress();
+  renderFlashcards();
+  if (flashcardSessionActive && flashcardSessionIndex >= flashcardSessionQueue.length) byId("flashcardRestart").focus({ preventScroll: true });
+  else if (flashcardSessionActive) byId("flashcardFace").focus({ preventScroll: true });
+}
+function resetFlashcardForm() {
+  const form = byId("flashcardForm");
+  if (!form) return;
+  form.reset();
+  editingFlashcardId = null;
+  byId("flashcardFormKicker").textContent = "BUILD YOUR DECK";
+  byId("flashcardFormTitle").textContent = "Create a flashcard";
+  byId("flashcardSave").textContent = "Save card";
+  byId("flashcardCancelEdit").hidden = true;
+  byId("flashcardFormNote").textContent = "";
+  const firstSubject = activeSubjects[0] || DEFAULT_SUBJECTS[0];
+  if ([...byId("flashcardSubject").options].some((option) => option.value === firstSubject)) byId("flashcardSubject").value = firstSubject;
+}
+function editFlashcard(id) {
+  const card = flashcards.find((item) => item.id === id);
+  if (!card) return;
+  editingFlashcardId = card.id;
+  byId("flashcardSubject").value = card.subject;
+  byId("flashcardFront").value = card.front;
+  byId("flashcardBack").value = card.back;
+  byId("flashcardFormKicker").textContent = "UPDATE YOUR DECK";
+  byId("flashcardFormTitle").textContent = "Edit flashcard";
+  byId("flashcardSave").textContent = "Save changes";
+  byId("flashcardCancelEdit").hidden = false;
+  byId("flashcardFormNote").textContent = "Editing this card keeps its review schedule.";
+  byId("flashcardFront").focus();
+}
+function deleteFlashcard(id) {
+  const card = flashcards.find((item) => item.id === id);
+  if (!card || !window.confirm("Delete this flashcard? This cannot be undone.")) return;
+  flashcards = flashcards.filter((item) => item.id !== id);
+  if (editingFlashcardId === id) resetFlashcardForm();
+  flashcardSessionQueue = [];
+  flashcardSessionIndex = 0;
+  flashcardSessionActive = false;
+  flashcardRevealed = false;
+  saveFlashcardsLocally();
+  renderFlashcards();
+  showToast("Flashcard deleted.");
+}
 function recordQuizAnswer(subject, correct) {
   const quiz = learningProgress.quiz;
   quiz.answered += 1;
@@ -899,7 +1616,7 @@ function recordQuizAnswer(subject, correct) {
     quiz.bySubject[subject] = result;
   }
   recordLearningActivity();
-  safeWrite(STORAGE.progress, learningProgress);
+  saveStudyStateLocally();
   renderDashboardProgress();
 }
 function renderDashboardProgress() {
@@ -1139,7 +1856,7 @@ function addCustomTask() {
     if (!title) return;
     const task = { id: "personal-" + Date.now().toString(36), title, done: false };
     customTasks.push(task);
-    safeWrite(STORAGE.tasks, customTasks);
+    saveStudyStateLocally();
     byId("taskList").append(createCustomTask(task));
     attachTaskEvents();
     updatePlanProgress();
@@ -1194,7 +1911,7 @@ function openLesson(subject) {
   complete.addEventListener("click", () => {
     if (!learningProgress.completedLessons.includes(subject)) learningProgress.completedLessons.push(subject);
     recordLearningActivity();
-    safeWrite(STORAGE.progress, learningProgress);
+    saveStudyStateLocally();
     renderDashboardProgress();
     renderSubjectCards();
     complete.textContent = "Lesson completed ✓";
@@ -1220,7 +1937,7 @@ function navigate(name) {
   if (name === "tutor") { openTutor(); return; }
   if (name === "practice") { startQuiz(); return; }
   if (name === "home") { window.scrollTo({ top: 0, behavior: "smooth" }); return; }
-  const target = name === "subjects" ? byId("subjectsSection") : byId("plannerCard");
+  const target = name === "subjects" ? byId("subjectsSection") : name === "flashcards" ? byId("flashcardsSection") : byId("plannerCard");
   if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
@@ -1375,6 +2092,83 @@ document.querySelectorAll("[data-prompt]").forEach((button) => button.addEventLi
 }));
 byId("subjectPicker").addEventListener("click", openSubjectMenu);
 byId("practiceCardButton").addEventListener("click", startQuiz);
+byId("flashcardFilter").addEventListener("change", (event) => {
+  flashcardFilterSubject = event.currentTarget.value;
+  flashcardSessionQueue = [];
+  flashcardSessionIndex = 0;
+  flashcardSessionActive = false;
+  flashcardRevealed = false;
+  renderFlashcards();
+});
+byId("flashcardGeneratorForm").addEventListener("submit", generateFlashcards);
+byId("flashcardGeneratedList").addEventListener("input", (event) => {
+  const field = event.target.closest("[data-generated-field]");
+  if (!field) return;
+  const card = generatedFlashcards[Number(field.dataset.generatedIndex)];
+  if (!card) return;
+  card[field.dataset.generatedField] = field.value;
+  updateGeneratedFlashcardActions();
+});
+byId("flashcardGeneratedList").addEventListener("change", (event) => {
+  const checkbox = event.target.closest("input[data-generated-index]");
+  if (!checkbox) return;
+  const card = generatedFlashcards[Number(checkbox.dataset.generatedIndex)];
+  if (!card) return;
+  card.selected = checkbox.checked;
+  updateGeneratedFlashcardActions();
+});
+byId("flashcardAddSelected").addEventListener("click", saveSelectedGeneratedFlashcards);
+byId("flashcardDiscardGenerated").addEventListener("click", () => clearGeneratedFlashcards());
+byId("flashcardReviewDue").addEventListener("click", () => startFlashcardSession(true));
+byId("flashcardReviewAll").addEventListener("click", () => startFlashcardSession(false));
+byId("flashcardFace").addEventListener("click", () => {
+  if (!flashcardSessionActive || flashcardSessionIndex >= flashcardSessionQueue.length) return;
+  flashcardRevealed = !flashcardRevealed;
+  renderFlashcards();
+});
+byId("flashcardAgain").addEventListener("click", () => rateFlashcard(false));
+byId("flashcardRemembered").addEventListener("click", () => rateFlashcard(true));
+byId("flashcardRestart").addEventListener("click", () => startFlashcardSession(false));
+byId("flashcardFinish").addEventListener("click", () => {
+  flashcardSessionActive = false;
+  flashcardSessionQueue = [];
+  flashcardSessionIndex = 0;
+  flashcardRevealed = false;
+  renderFlashcards();
+});
+byId("flashcardForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const subject = byId("flashcardSubject").value;
+  const front = byId("flashcardFront").value.trim();
+  const back = byId("flashcardBack").value.trim();
+  if (!subject || !front || !back) {
+    byId("flashcardFormNote").textContent = "Add a subject, a prompt, and an answer to save this card.";
+    return;
+  }
+  const existing = editingFlashcardId ? flashcards.find((card) => card.id === editingFlashcardId) : null;
+  if (existing) {
+    existing.subject = subject;
+    existing.front = front;
+    existing.back = back;
+  } else {
+    flashcards.push({ id: newFlashcardId(), subject, front, back, createdAt: Date.now(), dueDate: localDateKey(new Date()), intervalDays: 0, reviewCount: 0 });
+  }
+  flashcardSessionQueue = [];
+  flashcardSessionIndex = 0;
+  flashcardSessionActive = false;
+  flashcardRevealed = false;
+  saveFlashcardsLocally();
+  resetFlashcardForm();
+  renderFlashcards();
+  showToast(existing ? "Flashcard updated." : "Flashcard saved.", "success");
+});
+byId("flashcardCancelEdit").addEventListener("click", resetFlashcardForm);
+byId("flashcardList").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-flashcard-action]");
+  if (!button) return;
+  if (button.dataset.flashcardAction === "edit") editFlashcard(button.dataset.flashcardId);
+  if (button.dataset.flashcardAction === "delete") deleteFlashcard(button.dataset.flashcardId);
+});
 document.querySelectorAll(".modal-close").forEach((button) => button.addEventListener("click", closeModal));
 byId("modalScrim").addEventListener("click", closeModal);
 byId("settingsOpen").addEventListener("click", openLearningPreferences);
@@ -1498,7 +2292,7 @@ byId("accountForm").addEventListener("submit", async (event) => {
     }
     signedInProfile = result.profile;
     loadThemePreference();
-    bindAccountStorage(result.profile, result.created === true);
+    await bindAccountStorage(result.profile, result.created === true);
     byId("accountForm").reset();
     syncProfile();
     syncBillingUI(signedInProfile.billing);

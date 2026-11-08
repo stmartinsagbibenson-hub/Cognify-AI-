@@ -6,6 +6,7 @@
   "description": "A friendly student dashboard with step-by-step AI tutoring, study planning and practice.",
   "scripts": {
     "start": "node server.mjs",
+    "dev": "node --watch server.mjs",
     "doctor": "node check-config.mjs",
     "smoke": "node scripts/smoke-test.mjs",
     "email:test": "node scripts/send-test-email.mjs",

@@ -91,6 +91,18 @@ db.exec(`
     consumed_at TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'reserved' CHECK(status IN ('reserved','consumed'))
   );
+  CREATE TABLE IF NOT EXISTS flashcard_decks (
+    user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    cards_json TEXT NOT NULL DEFAULT '[]',
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS study_workspaces (
+    user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    custom_tasks_json TEXT NOT NULL DEFAULT '[]',
+    done_json TEXT NOT NULL DEFAULT '[]',
+    progress_json TEXT NOT NULL DEFAULT '{}',
+    updated_at TEXT NOT NULL
+  );
   CREATE TABLE IF NOT EXISTS webhook_events (
     event_key TEXT PRIMARY KEY,
     event_type TEXT NOT NULL,

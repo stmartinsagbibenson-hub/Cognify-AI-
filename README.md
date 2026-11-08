@@ -1,6 +1,6 @@
 # Cognify
 
-Cognify is a student learning platform with a personalized dashboard, subject lessons, daily study planning, practice quizzes, and step-by-step AI tutoring. Free accounts work without a payment method. Premium adds unlimited AI tutoring and AI-generated practice. New profiles verify their email before signing in.
+Cognify is a student learning platform with a personalized dashboard, subject lessons, daily study planning, practice quizzes, AI-generated flashcards, and step-by-step AI tutoring. Free accounts work without a payment method. Premium adds unlimited AI tutoring and AI-generated study sets. New profiles verify their email before signing in.
 
 For persistent storage, production environment settings, provider dashboards, and rollback guidance, see [DEPLOYMENT.md](DEPLOYMENT.md). The release smoke checks are tracked in [PRELAUNCH_CHECKLIST.md](PRELAUNCH_CHECKLIST.md).
 
@@ -11,8 +11,8 @@ Cognify uses Node.js 22.13 or later, including its built-in SQLite module. No pa
 1. Copy `.env.example` to `.env` if it does not already exist.
 2. Create a Google OAuth 2.0 Web application client. Add `http://localhost:3000` as an authorized JavaScript origin and `http://localhost:3000/auth/google/callback` as an authorized redirect URI.
 3. Add the Google client ID and secret to `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in `.env`. Cognify derives the callback URI from `APP_URL`.
-4. Add a Groq API key to `GROQ_API_KEY` for live AI answers and generated practice.
-5. Start the server with `node server.mjs` (or `npm.cmd start` in PowerShell).
+4. Add a Groq API key to `GROQ_API_KEY` for live AI answers, practice questions, and flashcards.
+5. For development, run `npm.cmd run dev` in PowerShell; the server restarts when its source changes. For a normal start, use `node server.mjs` or `npm.cmd start`.
 6. Open [http://localhost:3000](http://localhost:3000).
 
 Google sign-in requests only the OpenID Connect `openid email profile` scopes. The server checks Google's signed identity token before creating or linking a Cognify profile. See Google's [OpenID Connect documentation](https://developers.google.com/identity/openid-connect/openid-connect) and [web server OAuth guide](https://developers.google.com/identity/protocols/oauth2/web-server).
@@ -37,7 +37,7 @@ Students can request a password reset from the sign-in window. Reset links are s
 
 ## Plans and usage
 
-- New accounts start on Free with 15 AI uses every 30 days. One use is a successful tutor answer or one generated practice set. Change the initial value with `FREE_USAGE_LIMIT` or update it later from `/admin`.
+- New accounts start on Free with 15 AI uses every 30 days. One use is a successful tutor answer, generated practice set, or generated flashcard set. Change the initial value with `FREE_USAGE_LIMIT` or update it later from `/admin`.
 - The use limit is checked and reserved in SQLite on the server before an AI request. Successful results are recorded; failed upstream requests release the reservation.
 - Premium removes the free AI cap while the subscription is active. A cancellation takes effect at the end of the paid period; provider expiry or a terminal cancellation returns the account to Free.
 - The dashboard displays the plan and remaining usage. Use **Plans** at `/pricing` and **My subscription** at `/subscription` to upgrade or manage a subscription.
@@ -69,9 +69,10 @@ For backup, migration, rollback, provider test scripts, and Docker deployment, u
 - Personalized subject cards with selections across science, arts and humanities, and commercial and finance subjects
 - AI tutor chat with subject and explanation-level preferences
 - Five-question practice rounds with Groq-generated questions and built-in samples as fallback
+- Groq-generated flashcard sets with editable previews, account-synced decks, due reviews, and growing recall intervals
 - Editable study plan, progress chart, saved display name, and learner settings
 - HTTP-only account sessions and salted scrypt password hashes
 - Single-use password reset links sent through the configured email provider; resets expire after one hour and sign out existing sessions
 - Server-side rate limiting and input validation for AI endpoints
 
-Study-plan checkmarks, custom goals, and chat history stay in the current browser and are separated by account. On first sign-in after this update, an existing student can keep the browser's previous saved study state; a newly created profile starts with an empty plan and chat. These items do not sync across devices.
+Study-plan checkmarks, custom goals, and chat history stay in the current browser and are separated by account. Flashcard decks are saved with the student account in SQLite and synced across devices, with a browser copy for offline access. On first sign-in after this update, an existing student's browser deck is copied to the account if no server deck exists. Use a persistent database volume in production so account decks survive deployments.

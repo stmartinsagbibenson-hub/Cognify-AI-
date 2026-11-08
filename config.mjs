@@ -60,7 +60,7 @@ export function validateStartupConfig() {
     if (!process.env.GOOGLE_CLIENT_ID?.trim() || !process.env.GOOGLE_CLIENT_SECRET?.trim()) {
       issues.push("Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET for production sign-in.");
     }
-    if (!process.env.GROQ_API_KEY?.trim()) issues.push("Set GROQ_API_KEY to enable the production tutor and generated practice.");
+    if (!process.env.GROQ_API_KEY?.trim()) issues.push("Set GROQ_API_KEY to enable the production tutor, generated practice, and flashcards.");
   }
   if (issues.length) throw new Error("Cognify startup configuration is invalid:\n- " + issues.join("\n- "));
 }

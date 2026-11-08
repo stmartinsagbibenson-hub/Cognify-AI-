@@ -30,7 +30,7 @@ function parseAppUrl() {
 check("Node.js", supportedNode, "supported version", "install Node.js 22.13 or later");
 check("Google sign-in", Boolean(process.env.GOOGLE_CLIENT_ID?.trim() && process.env.GOOGLE_CLIENT_SECRET?.trim()),
   "OAuth web client credentials are set", "set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET");
-check("Groq AI", Boolean(process.env.GROQ_API_KEY?.trim()), "API key is set", "set GROQ_API_KEY to enable live tutoring and generated practice");
+check("Groq AI", Boolean(process.env.GROQ_API_KEY?.trim()), "API key is set", "set GROQ_API_KEY to enable live tutoring, practice, and flashcards");
 
 const emailProvider = (process.env.EMAIL_PROVIDER || "resend").toLowerCase();
 const emailReady = emailProvider === "resend" && Boolean(process.env.RESEND_API_KEY?.trim()) && validSender(process.env.EMAIL_FROM);
