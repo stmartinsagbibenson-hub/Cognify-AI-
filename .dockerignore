@@ -1,0 +1,12 @@
+.git
+.gitignore
+node_modules/
+data/
+backups/
+.env
+.env.*
+!.env.example
+npm-debug.log*
+*.log
+*.sqlite
+*.sqlite-*

@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f7f7fc">
+  <meta name="description" content="Choose your Cognify plan and manage your subscription.">
+  <title>Cognify plans</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/billing.css">
+  <script src="/billing.js" defer></script>
+</head>
+<body class="billing-body">
+  <header class="billing-header">
+    <a class="billing-brand" href="/" aria-label="Cognify home"><span class="billing-logo">✦</span><span>Cognify<span>.</span></span></a>
+    <nav><a href="/pricing" data-nav-pricing>Plans</a><a href="/subscription" data-nav-subscription>My subscription</a><a href="/admin" data-nav-admin hidden>Admin</a></nav>
+    <a class="back-link" href="/">← Back to study space</a>
+  </header>
+
+  <main class="billing-main">
+    <section class="billing-notice" id="billingNotice" role="status" aria-live="polite" hidden></section>
+
+    <section class="billing-view" id="paymentPage" hidden>
+      <article class="payment-result-card" aria-live="polite">
+        <span class="payment-result-icon" id="paymentResultIcon">…</span>
+        <span class="billing-eyebrow">SECURE CHECKOUT</span>
+        <h1 id="paymentResultTitle">Checking your payment</h1>
+        <p id="paymentResultMessage">We’re waiting for Paystack’s signed confirmation before changing your plan.</p>
+        <a class="billing-button billing-button-primary" id="paymentResultAction" href="/subscription" hidden>View my subscription</a>
+        <a class="payment-secondary-link" id="paymentRetryLink" href="/pricing" hidden>Return to plans</a>
+      </article>
+    </section>
+
+    <section class="billing-view" id="pricingPage" hidden>
+      <div class="billing-intro">
+        <span class="billing-eyebrow">A PLAN THAT FITS YOUR PACE</span>
+        <h1>Make room for more <em>“aha!”</em> moments.</h1>
+        <p>Start for free, then upgrade whenever you’re ready for more one-to-one help.</p>
+      </div>
+      <div class="pricing-grid">
+        <article class="price-card">
+          <div class="price-card-top"><div><span class="plan-overline">START HERE</span><h2>Free</h2></div><span class="plan-pill">Always free</span></div>
+          <p class="price-description">A friendly place to build a steady study habit.</p>
+          <div class="price-amount"><strong>₦0</strong><span>forever</span></div>
+          <ul class="feature-list" id="freeFeatureList"><li>Study dashboard and planner</li><li>Basic lessons and sample quizzes</li><li>15 AI sessions every 30 days</li></ul>
+          <a class="billing-button billing-button-light" href="/?signup=1&amp;next=%2Fpricing" id="freePlanButton">Create a free account</a>
+        </article>
+        <article class="price-card price-card-premium">
+          <div class="price-card-top"><div><span class="plan-overline">FOR CURIOUS MINDS</span><h2>Premium</h2></div><span class="plan-pill premium-pill">Full access</span></div>
+          <p class="price-description">Keep learning with your personal AI tutor, whenever you need.</p>
+          <div class="price-amount"><strong id="premiumPrice">—</strong><span>/ month</span></div>
+          <ul class="feature-list" id="premiumFeatureList"><li>Unlimited AI tutoring</li><li>AI-generated practice questions</li><li>Secure monthly subscription</li><li>Cancel any time</li></ul>
+          <button class="billing-button billing-button-primary" id="upgradeButton" type="button">Upgrade to Premium <span aria-hidden="true">↗</span></button>
+          <p class="secure-note">Secure checkout by Paystack · card and eligible Nigerian bank debit</p>
+        </article>
+      </div>
+      <p class="billing-footnote">Your card details are entered securely on Paystack. Cognify never receives or stores raw card details.</p>
+    </section>
+
+    <section class="billing-view" id="subscriptionPage" hidden>
+      <div class="billing-intro compact-intro"><span class="billing-eyebrow">YOUR ACCOUNT</span><h1>Subscription settings</h1><p>Check your plan, payment history, and renewal details.</p></div>
+      <div class="subscription-layout">
+        <article class="subscription-card">
+          <div class="subscription-heading"><div><span class="plan-overline">CURRENT PLAN</span><h2 id="currentPlanName">Loading…</h2></div><span class="status-pill" id="subscriptionStatus">Loading</span></div>
+          <p class="subscription-copy" id="subscriptionDescription">Loading your subscription details…</p>
+          <div class="usage-summary" id="subscriptionUsage"></div>
+          <div class="subscription-dates" id="subscriptionDates"></div>
+          <div class="subscription-actions"><a class="billing-button billing-button-primary" id="subscriptionUpgrade" href="/pricing">View Premium</a><button class="billing-button billing-button-light" id="cancelSubscription" type="button" hidden>Cancel renewal</button></div>
+          <p class="secure-note" id="cancelNote" hidden>Your Premium access stays on until the paid period ends.</p>
+        </article>
+        <article class="history-card"><div class="history-heading"><div><span class="plan-overline">RECEIPTS</span><h2>Payment history</h2></div></div><div id="paymentHistory" class="payment-history"><p class="empty-state">Loading payment history…</p></div></article>
+      </div>
+    </section>
+
+    <section class="billing-view" id="adminPage" hidden>
+      <div class="billing-intro compact-intro"><span class="billing-eyebrow">COGNIFY CONTROL ROOM</span><h1>Admin</h1><p>Review accounts and billing, and update the plans students see.</p></div>
+      <div id="adminGate"><form class="admin-settings admin-key-form" id="adminKeyForm">
+        <div class="admin-section-title"><div><span class="plan-overline">ADMIN ACCESS</span><h2>Unlock the control room</h2></div></div>
+        <div class="admin-fields"><label>Signed-in account<input id="adminEmail" type="text" readonly placeholder="Sign in with the configured admin account"></label><label>Server access key<input id="adminKey" type="password" autocomplete="off" placeholder="Enter ADMIN_ACCESS_KEY"></label><button class="billing-button billing-button-primary" type="submit">Unlock admin</button></div>
+        <p class="secure-note">Both the signed-in admin account and the private server access key are required. On the public HTTPS site, the key is sent once, then cleared; the server grants a short-lived HttpOnly access cookie.</p>
+      </form></div>
+      <div id="adminDenied" class="empty-state" hidden>Admin access is only available to the configured account with the correct server access key.</div>
+      <div id="adminContent" hidden>
+        <form class="admin-settings" id="adminSettingsForm">
+          <div class="admin-section-title"><div><span class="plan-overline">PLAN SETTINGS</span><h2>Pricing and free usage</h2></div></div>
+          <div class="admin-fields"><label>Free AI uses per 30 days<input id="adminFreeLimit" type="number" min="1" max="1000" required></label><label>Premium price per month (NGN)<input id="adminPremiumPrice" type="number" min="50" step="1" required></label><button class="billing-button billing-button-primary" type="submit">Save plan settings</button></div>
+          <p class="secure-note">Changing the Premium price creates a new Paystack monthly plan for future subscribers. Existing subscriptions keep their original price.</p>
+        </form>
+        <section class="admin-table-card"><div class="admin-section-title"><div><span class="plan-overline">ACCOUNT ACCESS</span><h2>Users</h2></div><span class="table-count" id="userCount"></span></div><div class="table-scroll"><table><thead><tr><th>Student</th><th>Plan</th><th>Usage</th><th>Subscription</th><th>Access</th><th>Action</th></tr></thead><tbody id="usersTable"></tbody></table></div></section>
+        <section class="admin-table-card"><div class="admin-section-title"><div><span class="plan-overline">BILLING</span><h2>Active subscriptions</h2></div></div><div class="table-scroll"><table><thead><tr><th>Student</th><th>Status</th><th>Price</th><th>Next renewal / expiry</th></tr></thead><tbody id="subscriptionsTable"></tbody></table></div></section>
+        <section class="admin-table-card"><div class="admin-section-title"><div><span class="plan-overline">LATEST ACTIVITY</span><h2>Payments</h2></div></div><div class="table-scroll"><table><thead><tr><th>Student</th><th>Reference</th><th>Amount</th><th>Status</th><th>Date</th></tr></thead><tbody id="adminPaymentsTable"></tbody></table></div></section>
+      </div>
+    </section>
+  </main>
+  <footer class="billing-footer"><span>Made for curious minds ✦</span><a href="/">Return to Cognify</a></footer>
+</body>
+</html>

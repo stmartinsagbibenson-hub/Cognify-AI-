@@ -1,0 +1,18 @@
+{
+  "name": "cognify-learning-space",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A friendly student dashboard with step-by-step AI tutoring, study planning and practice.",
+  "scripts": {
+    "start": "node server.mjs",
+    "doctor": "node check-config.mjs",
+    "smoke": "node scripts/smoke-test.mjs",
+    "email:test": "node scripts/send-test-email.mjs",
+    "webhook:test": "node scripts/send-test-webhook.mjs",
+    "db:backup": "node scripts/backup-db.mjs"
+  },
+  "engines": {
+    "node": ">=22.13"
+  }
+}
