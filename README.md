@@ -1,6 +1,6 @@
 # Cognify
 
-Cognify is a friendly study space for students: a learning dashboard, subject lessons, a daily planner, short practice quizzes, and a step-by-step AI tutor. Free accounts work without a payment method. Premium adds unlimited AI tutoring and AI-generated practice. New profiles verify their email before signing in.
+Cognify is a student learning platform with a personalized dashboard, subject lessons, daily study planning, practice quizzes, and step-by-step AI tutoring. Free accounts work without a payment method. Premium adds unlimited AI tutoring and AI-generated practice. New profiles verify their email before signing in.
 
 For persistent storage, production environment settings, provider dashboards, and rollback guidance, see [DEPLOYMENT.md](DEPLOYMENT.md). The release smoke checks are tracked in [PRELAUNCH_CHECKLIST.md](PRELAUNCH_CHECKLIST.md).
 
