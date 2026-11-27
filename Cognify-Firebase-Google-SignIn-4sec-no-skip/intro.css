@@ -1,0 +1,16 @@
+html.intro-playing, html.intro-playing body { overflow: hidden; }
+.intro-screen {
+  position: fixed; inset: 0; z-index: 10000;
+  display: grid; place-items: center;
+  overflow: hidden; background: #5014ed;
+  opacity: 1; visibility: visible;
+  transition: opacity .45s ease, visibility .45s ease;
+}
+.intro-screen.is-leaving { opacity: 0; visibility: hidden; pointer-events: none; }
+.intro-video {
+  display: block; width: min(100vw, 100vh); height: min(100vw, 100vh);
+  max-width: 100%; max-height: 100%; object-fit: contain;
+}
+@media (prefers-reduced-motion: reduce) {
+  .intro-screen { transition: none; }
+}
