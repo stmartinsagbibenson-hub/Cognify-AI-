@@ -26,9 +26,28 @@
   }
 
   // Fallback in case playback cannot start or the video stalls.
-  fallbackTimer = window.setTimeout(finishIntro, 6500);
+ video.pause();
+video.currentTime = 0;
+
+video.addEventListener("loadedmetadata", () => {
+  video.currentTime = 0;
+  video.play().catch(finishIntro);
+}, { once: true });
+
+fallbackTimer = window.setTimeout(finishIntro, 30000);
+
+function startVideo() {
+  video.currentTime = 0;
+
   const playback = video.play();
   if (playback && typeof playback.catch === "function") {
     playback.catch(finishIntro);
   }
+}
+
+if (video.readyState >= 1) {
+  startVideo();
+} else {
+  video.addEventListener("loadedmetadata", startVideo, { once: true });
+}
 })();
