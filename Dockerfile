@@ -7,8 +7,7 @@ ENV NODE_ENV=production \
     TRUST_PROXY=false \
     COOKIE_SECURE=true \
     DATABASE_PATH=/app/data/cognify.sqlite
-
-COPY --chown=node:node package.json README.md .env.example ./*.mjs ./*.js ./*.html ./*.css ./*.svg ./
+COPY --chown=node:node package.json README.md .env.example ./*.mjs ./*.js ./*.html ./*.css ./*.svg ./*.mp4 ./
 COPY --chown=node:node scripts ./scripts
 RUN mkdir -p /app/data && chown node:node /app/data
 
