@@ -10,8 +10,15 @@
   <link rel="stylesheet" href="/styles.css?v=flashcards-sync-1">
   <link rel="stylesheet" href="/markdown.css?v=answer-layout-1">
   <script src="/app.js?v=flashcards-sync-1" defer></script>
+  <link rel="stylesheet" href="/intro.css?v=1">
+  <script src="/intro.js?v=1" defer></script>
 </head>
 <body class="auth-required">
+  <div class="intro-screen" id="introScreen" aria-label="Cognify introduction">
+    <video class="intro-video" id="introVideo" autoplay muted playsinline preload="auto">
+      <source src="/cognify-intro.mp4" type="video/mp4">
+    </video>
+  </div>
   <div class="app-shell">
     <aside class="sidebar" aria-label="Main navigation">
       <a class="brand" href="#home" aria-label="Cognify home">
@@ -383,6 +390,3 @@
   <div class="toast-region" id="toastRegion" aria-live="polite" aria-atomic="true"></div>
 </body>
 </html>
-
-
-

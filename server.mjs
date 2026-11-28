@@ -36,7 +36,10 @@ const publicFiles = new Map([
   ["/markdown.css", ["markdown.css", "text/css; charset=utf-8"]],
   ["/app.js", ["app.js", "text/javascript; charset=utf-8"]],
   ["/billing.js", ["billing.js", "text/javascript; charset=utf-8"]],
-  ["/favicon.svg", ["favicon.svg", "image/svg+xml"]]
+  ["/favicon.svg", ["favicon.svg", "image/svg+xml"]],
+  ["/intro.css", ["intro.css", "text/css; charset=utf-8"]],
+  ["/intro.js", ["intro.js", "text/javascript; charset=utf-8"]],
+  ["/cognify-intro.mp4", ["cognify-intro.mp4", "video/mp4"]]
 ]);
 const rateLimit = new Map();
 const authAttempts = new Map();
