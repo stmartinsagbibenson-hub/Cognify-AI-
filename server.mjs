@@ -1732,10 +1732,16 @@ async function handleRequest(request, response) {
       "Content-Length": contents.length
     });
     response.end(request.method === "HEAD" ? undefined : contents);
-  } catch {
-    response.writeHead(500, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" });
-    response.end("App file unavailable");
-  }
+ } catch (error) {
+  console.error("File read error:", file[0], error.code, error.message);
+
+  response.writeHead(500, {
+    "Content-Type": "text/plain; charset=utf-8",
+    "Cache-Control": "no-store"
+  });
+
+  response.end("App file unavailable");
+}
 }
 
 const server = createServer((request, response) => {
